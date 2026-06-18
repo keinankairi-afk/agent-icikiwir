@@ -235,11 +235,30 @@ if [ ! -f "$HERMES_HOME/config.yaml" ]; then
             fi
             ;;
         *)
-            PROVIDER_NAME=""
-            PROVIDER_MODEL=""
-            PROVIDER_URL=""
-            PROVIDER_ENV_KEY=""
-            warn "Custom — you'll need to edit config.yaml manually"
+            echo ""
+            echo -e "  ${CYAN}Custom Provider Setup${NC}"
+            echo -e "  ${BLUE}Masukkan data provider kamu:${NC}"
+            echo ""
+
+            if is_piped; then
+                warn "Piped mode — edit manually: nano ~/.hermes/config.yaml"
+                PROVIDER_NAME="custom"
+                PROVIDER_MODEL=""
+                PROVIDER_URL=""
+                PROVIDER_ENV_KEY="API_KEY"
+            else
+                read -p "  Provider name (e.g. openrouter, cohere, google): " CUSTOM_PROVIDER
+                read -p "  Model name (e.g. anthropic/claude-sonnet-4): " CUSTOM_MODEL
+                read -p "  Base URL (e.g. https://openrouter.ai/api/v1): " CUSTOM_URL
+                read -p "  API key env var name (e.g. OPENROUTER_API_KEY): " CUSTOM_ENV_KEY
+
+                PROVIDER_NAME="${CUSTOM_PROVIDER:-custom}"
+                PROVIDER_MODEL="${CUSTOM_MODEL:-}"
+                PROVIDER_URL="${CUSTOM_URL:-}"
+                PROVIDER_ENV_KEY="${CUSTOM_ENV_KEY:-API_KEY}"
+            fi
+
+            log "Custom provider: $PROVIDER_NAME"
             ;;
     esac
 
