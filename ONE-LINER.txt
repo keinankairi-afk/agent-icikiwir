@@ -1,0 +1,7 @@
+# Hermes Agent One-Liner Installer
+# Jalankan di VPS baru (Ubuntu/Debian):
+
+bash <(curl -sL https://raw.githubusercontent.com/keinankairi-afk/hermes-installer/main/install.sh)
+
+# Atau pakai wget:
+bash <(wget -qO- https://raw.githubusercontent.com/keinankairi-afk/hermes-installer/main/install.sh)
