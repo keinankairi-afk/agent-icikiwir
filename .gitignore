@@ -1,0 +1,10 @@
+# Agent Icikiwir .gitignore
+*.pyc
+__pycache__/
+node_modules/
+.env
+*.log
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak

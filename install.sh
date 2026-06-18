@@ -1,16 +1,16 @@
 #!/bin/bash
 # ============================================================
-#  Hermes Agent One-Liner Installer
+#  Agent Icikiwir - Hermes Agent One-Liner Installer
 #  Ramah pemula, auto-setup di VPS baru
 #
 #  Usage:
-#    curl -sL https://raw.githubusercontent.com/keinankairi-afk/hermes-installer/main/install.sh | bash
+#    curl -sL https://raw.githubusercontent.com/keinankairi-afk/agent-icikiwir/main/install.sh | bash
 #
 #  Atau:
-#    wget -qO- https://raw.githubusercontent.com/keinankairi-afk/hermes-installer/main/install.sh | bash
+#    wget -qO- https://raw.githubusercontent.com/keinankairi-afk/agent-icikiwir/main/install.sh | bash
 # ============================================================
 
-set -e
+set -euo pipefail
 
 # Colors
 RED='\033[0;31m'
@@ -20,6 +20,12 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+# Config - change these if you fork the repo
+REPO_OWNER="keinankairi-afk"
+REPO_NAME="agent-icikiwir"
+REPO_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}.git"
+RAW_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main"
+
 # Functions
 log() { echo -e "${GREEN}[✓]${NC} $1"; }
 warn() { echo -e "${YELLOW}[!]${NC} $1"; }
@@ -27,21 +33,25 @@ error() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 info() { echo -e "${BLUE}[i]${NC} $1"; }
 header() { echo -e "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; echo -e "${CYAN}  $1${NC}"; echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"; }
 
+# Detect if running piped (curl | bash) or from local file
+is_piped() { [ ! -t 0 ]; }
+
 # ============================================================
 # STEP 0: Pre-flight checks
 # ============================================================
-header "🚀 Hermes Agent Installer v1.0"
+header "🚀 Agent Icikiwir Installer v1.1"
 
-if [ "$EUID" -eq 0 ]; then
-    warn "Running as root. This is OK for VPS setup."
+if [ "$(uname -s)" != "Linux" ]; then
+    error "This installer only supports Linux (Ubuntu/Debian)"
 fi
 
 ARCH=$(uname -m)
 OS=$(uname -s)
 info "System: $OS $ARCH"
 
-if [ "$OS" != "Linux" ]; then
-    error "This installer only supports Linux (Ubuntu/Debian)"
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+    error "Please run as root: sudo bash install.sh"
 fi
 
 # ============================================================
@@ -49,7 +59,7 @@ fi
 # ============================================================
 header "📦 Installing System Dependencies"
 
-apt-get update -qq
+apt-get update -qq || error "apt-get update failed"
 apt-get install -y -qq \
     python3 \
     python3-pip \
@@ -63,12 +73,12 @@ apt-get install -y -qq \
     build-essential \
     libssl-dev \
     libffi-dev \
-    > /dev/null 2>&1
+    > /dev/null 2>&1 || error "Failed to install system packages"
 
 log "System packages installed"
 
 # Check Python version
-PYTHON_VERSION=$(python3 --version 2>&1 | grep -oP '\d+\.\d+')
+PYTHON_VERSION=$(python3 --version 2>&1 | grep -oP '\d+\.\d+' || echo "unknown")
 info "Python: $PYTHON_VERSION"
 
 # ============================================================
@@ -79,8 +89,11 @@ header "📦 Installing Node.js"
 if command -v node &> /dev/null; then
     log "Node.js already installed: $(node --version)"
 else
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - > /dev/null 2>&1
+    # Use NodeSource setup script (safer than raw curl | bash)
+    curl -fsSL https://deb.nodesource.com/setup_20.x -o /tmp/nodesource_setup.sh
+    bash /tmp/nodesource_setup.sh > /dev/null 2>&1
     apt-get install -y -qq nodejs > /dev/null 2>&1
+    rm -f /tmp/nodesource_setup.sh
     log "Node.js installed: $(node --version)"
 fi
 
@@ -94,17 +107,24 @@ HERMES_AGENT="$HOME/hermes-agent"
 
 if [ -d "$HERMES_AGENT" ]; then
     warn "Hermes Agent already exists at $HERMES_AGENT"
-    read -p "Overwrite? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        info "Skipping clone, using existing installation"
-    else
+    if is_piped; then
+        # In piped mode, auto-overwrite (user can Ctrl+C to abort)
+        warn "Piped mode detected. Overwriting in 3 seconds... (Ctrl+C to abort)"
+        sleep 3
         rm -rf "$HERMES_AGENT"
-        git clone --depth 1 https://github.com/NousResearch/hermes-agent.git "$HERMES_AGENT"
-        log "Hermes Agent cloned"
+    else
+        read -p "Overwrite? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            info "Skipping clone, using existing installation"
+        else
+            rm -rf "$HERMES_AGENT"
+        fi
     fi
-else
-    git clone --depth 1 https://github.com/NousResearch/hermes-agent.git "$HERMES_AGENT"
+fi
+
+if [ ! -d "$HERMES_AGENT" ]; then
+    git clone --depth 1 https://github.com/NousResearch/hermes-agent.git "$HERMES_AGENT" || error "Failed to clone Hermes Agent"
     log "Hermes Agent cloned"
 fi
 
@@ -118,13 +138,13 @@ cd "$HERMES_AGENT"
 if [ -d ".venv" ]; then
     log "Virtual environment already exists"
 else
-    python3 -m venv .venv
+    python3 -m venv .venv || error "Failed to create venv"
     log "Virtual environment created"
 fi
 
 source .venv/bin/activate
-pip install --upgrade pip -q
-pip install -r requirements.txt -q 2>/dev/null || pip install -e . -q 2>/dev/null || true
+pip install --upgrade pip -q 2>/dev/null || true
+pip install -r requirements.txt -q 2>/dev/null || pip install -e . -q 2>/dev/null || warn "Some Python deps may be missing"
 log "Python dependencies installed"
 
 # ============================================================
@@ -178,17 +198,24 @@ fi
 # ============================================================
 header "📚 Installing Skills"
 
-SKILLS_URL="https://github.com/keinankairi-afk/hermes-installer/raw/main/skills.tar.gz"
+SKILLS_URL="${RAW_URL}/skills.tar.gz"
 
-if [ -f "$HERMES_HOME/skills.tar.gz" ] || [ -f "/home/ubuntu/hermes-export/skills.tar.gz" ]; then
-    # Local restore
-    if [ -f "/home/ubuntu/hermes-export/skills.tar.gz" ]; then
-        cp /home/ubuntu/hermes-export/skills.tar.gz "$HERMES_HOME/skills.tar.gz"
-    fi
+# Try to download from GitHub if not found locally
+if [ ! -f "$HERMES_HOME/skills.tar.gz" ] && [ ! -f "/tmp/agent-icikiwir/skills.tar.gz" ]; then
+    info "Downloading skills from GitHub..."
+    curl -sL "$SKILLS_URL" -o "$HERMES_HOME/skills.tar.gz" 2>/dev/null || warn "Failed to download skills"
+fi
+
+# Copy from local if available
+if [ -f "/tmp/agent-icikiwir/skills.tar.gz" ]; then
+    cp /tmp/agent-icikiwir/skills.tar.gz "$HERMES_HOME/skills.tar.gz"
+fi
+
+if [ -f "$HERMES_HOME/skills.tar.gz" ]; then
     cd "$HERMES_HOME/skills"
-    tar xzf "$HERMES_HOME/skills.tar.gz" --strip-components=0
+    tar xzf "$HERMES_HOME/skills.tar.gz" --strip-components=0 2>/dev/null || warn "Failed to extract skills"
     rm -f "$HERMES_HOME/skills.tar.gz"
-    SKILL_COUNT=$(find "$HERMES_HOME/skills" -name "SKILL.md" | wc -l)
+    SKILL_COUNT=$(find "$HERMES_HOME/skills" -name "SKILL.md" 2>/dev/null | wc -l)
     log "Skills restored: $SKILL_COUNT skills"
 else
     warn "No skills archive found. Skills will be empty."
@@ -200,14 +227,22 @@ fi
 # ============================================================
 header "🔌 Installing Plugins"
 
-PLUGINS_URL="https://github.com/keinankairi-afk/hermes-installer/raw/main/plugins.tar.gz"
+PLUGINS_URL="${RAW_URL}/plugins.tar.gz"
 
-if [ -f "$HERMES_HOME/plugins.tar.gz" ] || [ -f "/home/ubuntu/hermes-export/plugins.tar.gz" ]; then
-    if [ -f "/home/ubuntu/hermes-export/plugins.tar.gz" ]; then
-        cp /home/ubuntu/hermes-export/plugins.tar.gz "$HERMES_HOME/plugins.tar.gz"
-    fi
+# Try to download from GitHub if not found locally
+if [ ! -f "$HERMES_HOME/plugins.tar.gz" ] && [ ! -f "/tmp/agent-icikiwir/plugins.tar.gz" ]; then
+    info "Downloading plugins from GitHub..."
+    curl -sL "$PLUGINS_URL" -o "$HERMES_HOME/plugins.tar.gz" 2>/dev/null || warn "Failed to download plugins"
+fi
+
+# Copy from local if available
+if [ -f "/tmp/agent-icikiwir/plugins.tar.gz" ]; then
+    cp /tmp/agent-icikiwir/plugins.tar.gz "$HERMES_HOME/plugins.tar.gz"
+fi
+
+if [ -f "$HERMES_HOME/plugins.tar.gz" ]; then
     cd "$HERMES_HOME/plugins"
-    tar xzf "$HERMES_HOME/plugins.tar.gz" --strip-components=0
+    tar xzf "$HERMES_HOME/plugins.tar.gz" --strip-components=0 2>/dev/null || warn "Failed to extract plugins"
     rm -f "$HERMES_HOME/plugins.tar.gz"
     log "Plugins restored"
 else
@@ -219,10 +254,12 @@ fi
 # ============================================================
 header "🧠 Restoring Memories"
 
-if [ -f "/home/ubuntu/hermes-export/MEMORY.md" ]; then
-    cp /home/ubuntu/hermes-export/MEMORY.md "$HERMES_HOME/memories/MEMORY.md"
-    cp /home/ubuntu/hermes-export/USER.md "$HERMES_HOME/memories/USER.md"
-    log "Memories restored"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [ -f "$SCRIPT_DIR/MEMORY.md" ]; then
+    cp "$SCRIPT_DIR/MEMORY.md" "$HERMES_HOME/memories/MEMORY.md"
+    cp "$SCRIPT_DIR/USER.md" "$HERMES_HOME/memories/USER.md" 2>/dev/null || true
+    log "Memories restored from local"
 elif [ -f "$HERMES_HOME/memories/MEMORY.md" ]; then
     log "Memories already exist"
 else
@@ -234,9 +271,13 @@ fi
 # ============================================================
 header "📱 Restoring Channel Directory"
 
-if [ -f "/home/ubuntu/hermes-export/channel_directory.json" ]; then
-    cp /home/ubuntu/hermes-export/channel_directory.json "$HERMES_HOME/channel_directory.json"
+if [ -f "$SCRIPT_DIR/channel_directory.json" ]; then
+    cp "$SCRIPT_DIR/channel_directory.json" "$HERMES_HOME/channel_directory.json"
     log "Channel directory restored"
+elif [ -f "$HERMES_HOME/channel_directory.json" ]; then
+    log "Channel directory already exists"
+else
+    warn "No channel directory found."
 fi
 
 # ============================================================
@@ -266,8 +307,8 @@ Environment=HOME=$HOME
 WantedBy=multi-user.target
 SVC
 
-    systemctl daemon-reload
-    systemctl enable hermes-gateway
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl enable hermes-gateway 2>/dev/null || true
     log "Gateway service created"
 else
     warn "Hermes binary not found. Gateway not configured."
@@ -279,7 +320,7 @@ fi
 header "🔧 Final Setup"
 
 # Add to PATH
-if ! grep -q "hermes-agent/.venv/bin" ~/.bashrc; then
+if ! grep -q "hermes-agent/.venv/bin" ~/.bashrc 2>/dev/null; then
     echo 'export PATH="$HOME/hermes-agent/.venv/bin:$PATH"' >> ~/.bashrc
     log "Added hermes to PATH"
 fi
@@ -287,10 +328,10 @@ fi
 export PATH="$HERMES_AGENT/.venv/bin:$PATH"
 
 # Create quick aliases
-if ! grep -q "alias hm=" ~/.bashrc; then
+if ! grep -q "alias hm=" ~/.bashrc 2>/dev/null; then
     cat >> ~/.bashrc << 'ALIASES'
 
-# Hermes aliases
+# Agent Icikiwir aliases
 alias hm='hermes'
 alias hms='hermes gateway start'
 alias hmr='hermes gateway restart'
@@ -307,13 +348,13 @@ fi
 header "✅ Installation Complete!"
 
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}  Hermes Agent installed successfully! 🎉${NC}"
+echo -e "${GREEN}  Agent Icikiwir installed successfully! 🎉${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 echo -e "  ${CYAN}Location:${NC}     $HERMES_AGENT"
 echo -e "  ${CYAN}Config:${NC}       $HERMES_HOME/config.yaml"
 echo -e "  ${CYAN}Env:${NC}          $HERMES_HOME/.env"
-echo -e "  ${CYAN}Skills:${NC}       $(find $HERMES_HOME/skills -name 'SKILL.md' 2>/dev/null | wc -l) installed"
+echo -e "  ${CYAN}Skills:${NC}       $(find "$HERMES_HOME/skills" -name 'SKILL.md' 2>/dev/null | wc -l) installed"
 echo -e "  ${CYAN}Memories:${NC}     $HERMES_HOME/memories/"
 echo ""
 echo -e "  ${YELLOW}⚠️  NEXT STEPS:${NC}"
