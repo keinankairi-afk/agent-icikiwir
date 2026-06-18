@@ -1,13 +1,10 @@
 #!/bin/bash
 # ============================================================
-#  Agent Icikiwir - Hermes Agent One-Liner Installer
+#  Agent Icikiwir - Hermes Agent One-Liner Installer v1.2
 #  Ramah pemula, auto-setup di VPS baru
 #
 #  Usage:
-#    curl -sL https://raw.githubusercontent.com/keinankairi-afk/agent-icikiwir/main/install.sh | bash
-#
-#  Atau:
-#    wget -qO- https://raw.githubusercontent.com/keinankairi-afk/agent-icikiwir/main/install.sh | bash
+#    sudo bash <(curl -sL https://raw.githubusercontent.com/keinankairi-afk/agent-icikiwir/main/install.sh)
 # ============================================================
 
 set -euo pipefail
@@ -20,10 +17,9 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# Config - change these if you fork the repo
+# Config
 REPO_OWNER="keinankairi-afk"
 REPO_NAME="agent-icikiwir"
-REPO_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}.git"
 RAW_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main"
 
 # Functions
@@ -33,13 +29,20 @@ error() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 info() { echo -e "${BLUE}[i]${NC} $1"; }
 header() { echo -e "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; echo -e "${CYAN}  $1${NC}"; echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"; }
 
-# Detect if running piped (curl | bash) or from local file
+# Detect piped mode (curl | bash)
 is_piped() { [ ! -t 0 ]; }
+
+# Download file from GitHub
+download() {
+    local dest="$1"
+    local path="$2"
+    curl -sL "${RAW_URL}/${path}" -o "$dest" 2>/dev/null || warn "Failed to download: $path"
+}
 
 # ============================================================
 # STEP 0: Pre-flight checks
 # ============================================================
-header "🚀 Agent Icikiwir Installer v1.1"
+header "🚀 Agent Icikiwir Installer v1.2"
 
 if [ "$(uname -s)" != "Linux" ]; then
     error "This installer only supports Linux (Ubuntu/Debian)"
@@ -49,7 +52,6 @@ ARCH=$(uname -m)
 OS=$(uname -s)
 info "System: $OS $ARCH"
 
-# Check if running as root
 if [ "$EUID" -ne 0 ]; then
     error "Please run as root: sudo bash install.sh"
 fi
@@ -61,35 +63,25 @@ header "📦 Installing System Dependencies"
 
 apt-get update -qq || error "apt-get update failed"
 apt-get install -y -qq \
-    python3 \
-    python3-pip \
-    python3-venv \
-    git \
-    curl \
-    wget \
-    unzip \
-    sqlite3 \
-    jq \
-    build-essential \
-    libssl-dev \
-    libffi-dev \
+    python3 python3-pip python3-venv \
+    git curl wget unzip sqlite3 jq \
+    build-essential libssl-dev libffi-dev \
     > /dev/null 2>&1 || error "Failed to install system packages"
 
 log "System packages installed"
 
-# Check Python version
-PYTHON_VERSION=$(python3 --version 2>&1 | grep -oP '\d+\.\d+' || echo "unknown")
+# Check Python (portable, no grep -oP)
+PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "unknown")
 info "Python: $PYTHON_VERSION"
 
 # ============================================================
-# STEP 2: Install Node.js (for Hermes plugins)
+# STEP 2: Install Node.js
 # ============================================================
 header "📦 Installing Node.js"
 
 if command -v node &> /dev/null; then
     log "Node.js already installed: $(node --version)"
 else
-    # Use NodeSource setup script (safer than raw curl | bash)
     curl -fsSL https://deb.nodesource.com/setup_20.x -o /tmp/nodesource_setup.sh
     bash /tmp/nodesource_setup.sh > /dev/null 2>&1
     apt-get install -y -qq nodejs > /dev/null 2>&1
@@ -108,17 +100,16 @@ HERMES_AGENT="$HOME/hermes-agent"
 if [ -d "$HERMES_AGENT" ]; then
     warn "Hermes Agent already exists at $HERMES_AGENT"
     if is_piped; then
-        # In piped mode, auto-overwrite (user can Ctrl+C to abort)
-        warn "Piped mode detected. Overwriting in 3 seconds... (Ctrl+C to abort)"
+        warn "Piped mode: overwriting in 3s (Ctrl+C to abort)"
         sleep 3
         rm -rf "$HERMES_AGENT"
     else
         read -p "Overwrite? (y/N): " -n 1 -r
         echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            info "Skipping clone, using existing installation"
-        else
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
             rm -rf "$HERMES_AGENT"
+        else
+            info "Skipping clone"
         fi
     fi
 fi
@@ -135,14 +126,18 @@ header "🐍 Setting up Python Environment"
 
 cd "$HERMES_AGENT"
 
-if [ -d ".venv" ]; then
-    log "Virtual environment already exists"
-else
+if [ ! -d ".venv" ]; then
     python3 -m venv .venv || error "Failed to create venv"
     log "Virtual environment created"
 fi
 
-source .venv/bin/activate
+# Activate venv (with error handling)
+if [ -f ".venv/bin/activate" ]; then
+    source .venv/bin/activate
+else
+    error "venv activate script not found"
+fi
+
 pip install --upgrade pip -q 2>/dev/null || true
 pip install -r requirements.txt -q 2>/dev/null || pip install -e . -q 2>/dev/null || warn "Some Python deps may be missing"
 log "Python dependencies installed"
@@ -159,6 +154,11 @@ mkdir -p "$HERMES_HOME"/{skills,plugins,memories,logs,cron,cache}
 # ============================================================
 header "🤖 Choose Your LLM Provider"
 
+PROVIDER_NAME=""
+PROVIDER_MODEL=""
+PROVIDER_URL=""
+PROVIDER_ENV_KEY=""
+
 if [ ! -f "$HERMES_HOME/config.yaml" ]; then
     echo -e "  ${CYAN}Pilih provider LLM:${NC}"
     echo ""
@@ -172,11 +172,16 @@ if [ ! -f "$HERMES_HOME/config.yaml" ]; then
     echo -e "  ${BLUE}8.${NC} Custom (manual edit) — Isi config.yaml sendiri"
     echo ""
 
+    PROVIDER_CHOICE=""
     if is_piped; then
         PROVIDER_CHOICE="8"
-        warn "Piped mode: defaulting to Custom (manual edit)"
+        warn "Piped mode: defaulting to Custom (edit config.yaml manually)"
     else
-        read -p "  Pilih [1-8]: " PROVIDER_CHOICE
+        while true; do
+            read -p "  Pilih [1-8]: " PROVIDER_CHOICE
+            [[ "$PROVIDER_CHOICE" =~ ^[1-8]$ ]] && break
+            echo -e "  ${RED}Masukkan angka 1-8${NC}"
+        done
     fi
 
     case "$PROVIDER_CHOICE" in
@@ -184,7 +189,7 @@ if [ ! -f "$HERMES_HOME/config.yaml" ]; then
             PROVIDER_NAME="xiaomi"
             PROVIDER_MODEL="xiaomi/mimo-v2.5-pro"
             PROVIDER_URL="https://token-plan-sgp.xiaomimimo.com/v1"
-            PROVIDER_ENV_KEY="XIAO...N_API_KEY"
+            PROVIDER_ENV_KEY="XIAOMI_API_KEY"
             log "Xiaomi MiMo selected"
             ;;
         2)
@@ -228,46 +233,36 @@ if [ ! -f "$HERMES_HOME/config.yaml" ]; then
             PROVIDER_URL="http://localhost:11434/v1"
             PROVIDER_ENV_KEY=""
             log "Ollama (local) selected"
-            # Check if Ollama is installed
             if ! command -v ollama &> /dev/null; then
                 warn "Ollama not installed. Installing..."
-                curl -fsSL https://ollama.com/install.sh | sh 2>/dev/null || warn "Ollama install failed — install manually"
+                curl -fsSL https://ollama.com/install.sh -o /tmp/ollama_install.sh
+                bash /tmp/ollama_install.sh 2>/dev/null || warn "Ollama install failed — install manually: curl -fsSL https://ollama.com/install.sh | sh"
+                rm -f /tmp/ollama_install.sh
             fi
             ;;
-        *)
-            echo ""
-            echo -e "  ${CYAN}Custom Provider Setup${NC}"
-            echo -e "  ${BLUE}Masukkan data provider kamu:${NC}"
-            echo ""
-
+        8)
             if is_piped; then
-                warn "Piped mode — edit manually: nano ~/.hermes/config.yaml"
-                PROVIDER_NAME="custom"
-                PROVIDER_MODEL=""
-                PROVIDER_URL=""
-                PROVIDER_ENV_KEY="API_KEY"
+                warn "Piped mode: edit config.yaml manually after install"
             else
-                read -p "  Provider name (e.g. openrouter, cohere, google): " CUSTOM_PROVIDER
-                read -p "  Model name (e.g. anthropic/claude-sonnet-4): " CUSTOM_MODEL
-                read -p "  Base URL (e.g. https://openrouter.ai/api/v1): " CUSTOM_URL
-                read -p "  API key env var name (e.g. OPENROUTER_API_KEY): " CUSTOM_ENV_KEY
-
-                PROVIDER_NAME="${CUSTOM_PROVIDER:-custom}"
-                PROVIDER_MODEL="${CUSTOM_MODEL:-}"
-                PROVIDER_URL="${CUSTOM_URL:-}"
-                PROVIDER_ENV_KEY="${CUSTOM_ENV_KEY:-API_KEY}"
+                echo ""
+                echo -e "  ${CYAN}Custom Provider Setup${NC}"
+                echo -e "  Masukkan data provider kamu:"
+                echo ""
+                read -p "  Provider name (e.g. openrouter): " PROVIDER_NAME
+                read -p "  Model name (e.g. anthropic/claude-sonnet-4): " PROVIDER_MODEL
+                read -p "  Base URL (e.g. https://openrouter.ai/api/v1): " PROVIDER_URL
+                read -p "  API key env var name (e.g. OPENROUTER_API_KEY): " PROVIDER_ENV_KEY
+                log "Custom provider: $PROVIDER_NAME"
             fi
-
-            log "Custom provider: $PROVIDER_NAME"
             ;;
     esac
 
-    # Generate config.yaml based on provider choice
-    cat > "$HERMES_HOME/config.yaml" << CONFIG
+    # Generate config.yaml
+    cat > "$HERMES_HOME/config.yaml" << HEREDOC
 model:
-  default: ${PROVIDER_MODEL:-""}
-  provider: ${PROVIDER_NAME:-""}
-  base_url: ${PROVIDER_URL:-""}
+  default: ${PROVIDER_MODEL:-}
+  provider: ${PROVIDER_NAME:-}
+  base_url: ${PROVIDER_URL:-}
 providers: {}
 toolsets:
 - hermes-cli
@@ -279,46 +274,32 @@ terminal:
   backend: local
   timeout: 180
   persistent_shell: true
-CONFIG
+HEREDOC
     log "Config created"
 else
     log "Config already exists"
 fi
 
-# Create .env if not exists
+# ============================================================
+# STEP 6: Create .env
+# ============================================================
 if [ ! -f "$HERMES_HOME/.env" ]; then
-    cat > "$HERMES_HOME/.env" << ENVFILE
+    cat > "$HERMES_HOME/.env" << 'HEREDOC'
 # Agent Icikiwir - Environment Variables
 # Fill in ONLY the key for your chosen provider
 
 # === Telegram Bot ===
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_ALLOWED_USERS=
-TELEGRAM_HOME_CHANNEL=
+TELEGRAM_BOT_TOKEN=TELEGRAM_ALLOWED_USERS=TELEGRAM_HOME_CHANNEL=
 
 # === LLM Providers (fill ONE) ===
-# Xiaomi (MiMo)
-XIAOMI_API_KEY=
-XIAOMI_BASE_URL=https://token-plan-sgp.xiaomimimo.com/v1
-
-# Groq (free, fast)
-GROQ_API_KEY=
-
-# OpenRouter (all models)
-OPENROUTER_API_KEY=
-
-# OpenAI
-OPENAI_API_KEY=
-
-# Anthropic
-ANTHROPIC_API_KEY=
-
-# DeepSeek
-DEEPSEEK_API_KEY=
-
-# === Other ===
+XIAOMI_API_KEY=*** Groq
+GROQ_API_KEY=*** OpenRouter
+OPENROUTER_API_KEY=*** OpenAI
+OPENAI_API_KEY=*** Anthropic
+ANTHROPIC_API_KEY=*** DeepSeek
+DEEPSEEK_API_KEY=*** === Other ===
 TERMINAL_ENV=local
-ENVFILE
+HEREDOC
     chmod 600 "$HERMES_HOME/.env"
     log ".env template created"
 else
@@ -326,21 +307,13 @@ else
 fi
 
 # ============================================================
-# STEP 6: Download & Restore Skills
+# STEP 7: Download & Restore Skills
 # ============================================================
 header "📚 Installing Skills"
 
-SKILLS_URL="${RAW_URL}/skills.tar.gz"
-
-# Try to download from GitHub if not found locally
-if [ ! -f "$HERMES_HOME/skills.tar.gz" ] && [ ! -f "/tmp/agent-icikiwir/skills.tar.gz" ]; then
+if [ ! -f "$HERMES_HOME/skills.tar.gz" ]; then
     info "Downloading skills from GitHub..."
-    curl -sL "$SKILLS_URL" -o "$HERMES_HOME/skills.tar.gz" 2>/dev/null || warn "Failed to download skills"
-fi
-
-# Copy from local if available
-if [ -f "/tmp/agent-icikiwir/skills.tar.gz" ]; then
-    cp /tmp/agent-icikiwir/skills.tar.gz "$HERMES_HOME/skills.tar.gz"
+    download "$HERMES_HOME/skills.tar.gz" "skills.tar.gz"
 fi
 
 if [ -f "$HERMES_HOME/skills.tar.gz" ]; then
@@ -350,26 +323,17 @@ if [ -f "$HERMES_HOME/skills.tar.gz" ]; then
     SKILL_COUNT=$(find "$HERMES_HOME/skills" -name "SKILL.md" 2>/dev/null | wc -l)
     log "Skills restored: $SKILL_COUNT skills"
 else
-    warn "No skills archive found. Skills will be empty."
-    warn "To add skills later: hermes skills install <name>"
+    warn "No skills found. Add later: hermes skills install <name>"
 fi
 
 # ============================================================
-# STEP 7: Download & Restore Plugins
+# STEP 8: Download & Restore Plugins
 # ============================================================
 header "🔌 Installing Plugins"
 
-PLUGINS_URL="${RAW_URL}/plugins.tar.gz"
-
-# Try to download from GitHub if not found locally
-if [ ! -f "$HERMES_HOME/plugins.tar.gz" ] && [ ! -f "/tmp/agent-icikiwir/plugins.tar.gz" ]; then
+if [ ! -f "$HERMES_HOME/plugins.tar.gz" ]; then
     info "Downloading plugins from GitHub..."
-    curl -sL "$PLUGINS_URL" -o "$HERMES_HOME/plugins.tar.gz" 2>/dev/null || warn "Failed to download plugins"
-fi
-
-# Copy from local if available
-if [ -f "/tmp/agent-icikiwir/plugins.tar.gz" ]; then
-    cp /tmp/agent-icikiwir/plugins.tar.gz "$HERMES_HOME/plugins.tar.gz"
+    download "$HERMES_HOME/plugins.tar.gz" "plugins.tar.gz"
 fi
 
 if [ -f "$HERMES_HOME/plugins.tar.gz" ]; then
@@ -378,53 +342,57 @@ if [ -f "$HERMES_HOME/plugins.tar.gz" ]; then
     rm -f "$HERMES_HOME/plugins.tar.gz"
     log "Plugins restored"
 else
-    warn "No plugins archive found."
+    warn "No plugins found."
 fi
 
 # ============================================================
-# STEP 8: Restore Memories
+# STEP 9: Restore Memories, Channel, SOUL
 # ============================================================
-header "🧠 Restoring Memories"
+header "🧠 Restoring Config Files"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Download template files from GitHub
+for f in MEMORY.md USER.md channel_directory.json SOUL.md; do
+    if [ ! -f "$HERMES_HOME/$f" ] && [ ! -f "$HERMES_HOME/memories/$f" ]; then
+        download "/tmp/$f" "$f" 2>/dev/null || true
+    fi
+done
 
-if [ -f "$SCRIPT_DIR/MEMORY.md" ]; then
-    cp "$SCRIPT_DIR/MEMORY.md" "$HERMES_HOME/memories/MEMORY.md"
-    cp "$SCRIPT_DIR/USER.md" "$HERMES_HOME/memories/USER.md" 2>/dev/null || true
-    log "Memories restored from local"
+# MEMORY.md
+if [ -f "/tmp/MEMORY.md" ] && [ ! -f "$HERMES_HOME/memories/MEMORY.md" ]; then
+    cp /tmp/MEMORY.md "$HERMES_HOME/memories/MEMORY.md"
+    log "MEMORY.md restored"
 elif [ -f "$HERMES_HOME/memories/MEMORY.md" ]; then
-    log "Memories already exist"
-else
-    warn "No memories found. Starting fresh."
+    log "MEMORY.md already exists"
 fi
 
-# ============================================================
-# STEP 9: Restore Channel Directory
-# ============================================================
-header "📱 Restoring Channel Directory"
+# USER.md
+if [ -f "/tmp/USER.md" ] && [ ! -f "$HERMES_HOME/memories/USER.md" ]; then
+    cp /tmp/USER.md "$HERMES_HOME/memories/USER.md"
+    log "USER.md restored"
+elif [ -f "$HERMES_HOME/memories/USER.md" ]; then
+    log "USER.md already exists"
+fi
 
-if [ -f "$SCRIPT_DIR/channel_directory.json" ]; then
-    cp "$SCRIPT_DIR/channel_directory.json" "$HERMES_HOME/channel_directory.json"
-    log "Channel directory restored"
+# channel_directory.json
+if [ -f "/tmp/channel_directory.json" ] && [ ! -f "$HERMES_HOME/channel_directory.json" ]; then
+    cp /tmp/channel_directory.json "$HERMES_HOME/channel_directory.json"
+    log "channel_directory.json restored"
 elif [ -f "$HERMES_HOME/channel_directory.json" ]; then
-    log "Channel directory already exists"
-else
-    warn "No channel directory found."
+    log "channel_directory.json already exists"
 fi
 
-# ============================================================
-# STEP 9.5: Restore SOUL.md
-# ============================================================
-header "💀 Restoring SOUL.md"
-
-if [ -f "$SCRIPT_DIR/SOUL.md" ]; then
-    cp "$SCRIPT_DIR/SOUL.md" "$HERMES_HOME/SOUL.md"
+# SOUL.md
+if [ -f "/tmp/SOUL.md" ] && [ ! -f "$HERMES_HOME/SOUL.md" ]; then
+    cp /tmp/SOUL.md "$HERMES_HOME/SOUL.md"
     log "SOUL.md restored"
 elif [ -f "$HERMES_HOME/SOUL.md" ]; then
     log "SOUL.md already exists"
 else
     warn "No SOUL.md found. Agent will use default personality."
 fi
+
+# Cleanup tmp files
+rm -f /tmp/MEMORY.md /tmp/USER.md /tmp/channel_directory.json /tmp/SOUL.md
 
 # ============================================================
 # STEP 10: Setup Gateway Service
@@ -434,8 +402,7 @@ header "🌐 Setting up Gateway"
 HERMES_BIN="$HERMES_AGENT/.venv/bin/hermes"
 
 if [ -f "$HERMES_BIN" ]; then
-    # Create systemd service
-    cat > /etc/systemd/system/hermes-gateway.service << SVC
+    cat > /etc/systemd/system/hermes-gateway.service << HEREDOC
 [Unit]
 Description=Hermes Agent Gateway
 After=network.target
@@ -451,8 +418,7 @@ Environment=HOME=$HOME
 
 [Install]
 WantedBy=multi-user.target
-SVC
-
+HEREDOC
     systemctl daemon-reload 2>/dev/null || true
     systemctl enable hermes-gateway 2>/dev/null || true
     log "Gateway service created"
@@ -461,11 +427,10 @@ else
 fi
 
 # ============================================================
-# STEP 11: Add hermes to PATH
+# STEP 11: PATH & Aliases
 # ============================================================
 header "🔧 Final Setup"
 
-# Add to PATH
 if ! grep -q "hermes-agent/.venv/bin" ~/.bashrc 2>/dev/null; then
     echo 'export PATH="$HOME/hermes-agent/.venv/bin:$PATH"' >> ~/.bashrc
     log "Added hermes to PATH"
@@ -473,9 +438,8 @@ fi
 
 export PATH="$HERMES_AGENT/.venv/bin:$PATH"
 
-# Create quick aliases
 if ! grep -q "alias hm=" ~/.bashrc 2>/dev/null; then
-    cat >> ~/.bashrc << 'ALIASES'
+    cat >> ~/.bashrc << 'HEREDOC'
 
 # Agent Icikiwir aliases
 alias hm='hermes'
@@ -484,7 +448,7 @@ alias hmr='hermes gateway restart'
 alias hml='hermes logs --follow'
 alias hmp='hermes plugins list'
 alias hmsk='hermes skills list'
-ALIASES
+HEREDOC
     log "Aliases added (hm, hms, hmr, hml, hmp, hmsk)"
 fi
 
@@ -507,6 +471,7 @@ echo -e "  ${CYAN}Memories:${NC}     $HERMES_HOME/memories/"
 echo ""
 echo -e "  ${YELLOW}⚠️  NEXT STEPS:${NC}"
 echo ""
+
 if [ -n "${PROVIDER_ENV_KEY:-}" ]; then
     echo -e "  ${BLUE}1.${NC} Add your ${GREEN}${PROVIDER_ENV_KEY}${NC} in:"
     echo -e "     ${CYAN}nano $HERMES_HOME/.env${NC}"
@@ -515,6 +480,7 @@ else
     echo -e "     ${CYAN}nano $HERMES_HOME/.env${NC}"
     echo -e "     ${CYAN}nano $HERMES_HOME/config.yaml${NC}"
 fi
+
 echo ""
 echo -e "  ${BLUE}2.${NC} Start the gateway:"
 echo -e "     ${CYAN}sudo systemctl start hermes-gateway${NC}"
@@ -536,9 +502,11 @@ echo ""
 echo -e "  ${GREEN}Docs: https://hermes-agent.nousresearch.com/docs${NC}"
 echo ""
 
-# Check if .env needs editing
-if grep -q "^XIAOMI_API_KEY=$" "$HERMES_HOME/.env" 2>/dev/null; then
-    warn "⚠️  Don't forget to add your API keys in $HERMES_HOME/.env"
+# Final warning if API key not set
+if [ -n "${PROVIDER_ENV_KEY:-}" ]; then
+    if grep -q "^${PROVIDER_ENV_KEY}=$" "$HERMES_HOME/.env" 2>/dev/null; then
+        warn "⚠️  Don't forget to add your ${PROVIDER_ENV_KEY} in $HERMES_HOME/.env"
+    fi
 fi
 
 echo ""
