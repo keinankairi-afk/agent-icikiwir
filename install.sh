@@ -154,13 +154,101 @@ header "📁 Setting up Hermes Home"
 
 mkdir -p "$HERMES_HOME"/{skills,plugins,memories,logs,cron,cache}
 
-# Create config if not exists
+# ============================================================
+# STEP 5.5: Choose LLM Provider
+# ============================================================
+header "🤖 Choose Your LLM Provider"
+
 if [ ! -f "$HERMES_HOME/config.yaml" ]; then
-    cat > "$HERMES_HOME/config.yaml" << 'CONFIG'
+    echo -e "  ${CYAN}Pilih provider LLM:${NC}"
+    echo ""
+    echo -e "  ${BLUE}1.${NC} Xiaomi (MiMo)        — ${YELLOW}Gratis${NC}, API key dari mi.com"
+    echo -e "  ${BLUE}2.${NC} Groq                 — ${YELLOW}Gratis${NC}, Llama 3.3 70B, cepat"
+    echo -e "  ${BLUE}3.${NC} OpenRouter           — ${YELLOW}Bayar${NC}, semua model (Claude, GPT, dll)"
+    echo -e "  ${BLUE}4.${NC} OpenAI               — ${YELLOW}Bayar${NC}, GPT-4o / o3"
+    echo -e "  ${BLUE}5.${NC} Anthropic            — ${YELLOW}Bayar${NC}, Claude Sonnet/Opus"
+    echo -e "  ${BLUE}6.${NC} DeepSeek             — ${YELLOW}Murah${NC}, DeepSeek V3/R1"
+    echo -e "  ${BLUE}7.${NC} Ollama (local)       — ${YELLOW}Gratis${NC}, butuh RAM 8GB+"
+    echo -e "  ${BLUE}8.${NC} Custom (manual edit) — Isi config.yaml sendiri"
+    echo ""
+
+    if is_piped; then
+        PROVIDER_CHOICE="8"
+        warn "Piped mode: defaulting to Custom (manual edit)"
+    else
+        read -p "  Pilih [1-8]: " PROVIDER_CHOICE
+    fi
+
+    case "$PROVIDER_CHOICE" in
+        1)
+            PROVIDER_NAME="xiaomi"
+            PROVIDER_MODEL="xiaomi/mimo-v2.5-pro"
+            PROVIDER_URL="https://token-plan-sgp.xiaomimimo.com/v1"
+            PROVIDER_ENV_KEY="XIAO...N_API_KEY"
+            log "Xiaomi MiMo selected"
+            ;;
+        2)
+            PROVIDER_NAME="groq"
+            PROVIDER_MODEL="groq/llama-3.3-70b-versatile"
+            PROVIDER_URL="https://api.groq.com/openai/v1"
+            PROVIDER_ENV_KEY="GROQ_API_KEY"
+            log "Groq selected"
+            ;;
+        3)
+            PROVIDER_NAME="openrouter"
+            PROVIDER_MODEL="anthropic/claude-sonnet-4"
+            PROVIDER_URL="https://openrouter.ai/api/v1"
+            PROVIDER_ENV_KEY="OPENROUTER_API_KEY"
+            log "OpenRouter selected"
+            ;;
+        4)
+            PROVIDER_NAME="openai"
+            PROVIDER_MODEL="gpt-4o"
+            PROVIDER_URL="https://api.openai.com/v1"
+            PROVIDER_ENV_KEY="OPENAI_API_KEY"
+            log "OpenAI selected"
+            ;;
+        5)
+            PROVIDER_NAME="anthropic"
+            PROVIDER_MODEL="claude-sonnet-4"
+            PROVIDER_URL="https://api.anthropic.com/v1"
+            PROVIDER_ENV_KEY="ANTHROPIC_API_KEY"
+            log "Anthropic selected"
+            ;;
+        6)
+            PROVIDER_NAME="deepseek"
+            PROVIDER_MODEL="deepseek-chat"
+            PROVIDER_URL="https://api.deepseek.com/v1"
+            PROVIDER_ENV_KEY="DEEPSEEK_API_KEY"
+            log "DeepSeek selected"
+            ;;
+        7)
+            PROVIDER_NAME="ollama"
+            PROVIDER_MODEL="llama3.3:70b"
+            PROVIDER_URL="http://localhost:11434/v1"
+            PROVIDER_ENV_KEY=""
+            log "Ollama (local) selected"
+            # Check if Ollama is installed
+            if ! command -v ollama &> /dev/null; then
+                warn "Ollama not installed. Installing..."
+                curl -fsSL https://ollama.com/install.sh | sh 2>/dev/null || warn "Ollama install failed — install manually"
+            fi
+            ;;
+        *)
+            PROVIDER_NAME=""
+            PROVIDER_MODEL=""
+            PROVIDER_URL=""
+            PROVIDER_ENV_KEY=""
+            warn "Custom — you'll need to edit config.yaml manually"
+            ;;
+    esac
+
+    # Generate config.yaml based on provider choice
+    cat > "$HERMES_HOME/config.yaml" << CONFIG
 model:
-  default: xiaomi/mimo-v2.5-pro
-  provider: xiaomi
-  base_url: https://token-plan-sgp.xiaomimimo.com/v1
+  default: ${PROVIDER_MODEL:-""}
+  provider: ${PROVIDER_NAME:-""}
+  base_url: ${PROVIDER_URL:-""}
 providers: {}
 toolsets:
 - hermes-cli
@@ -173,20 +261,45 @@ terminal:
   timeout: 180
   persistent_shell: true
 CONFIG
-    log "Config created (default)"
+    log "Config created"
 else
     log "Config already exists"
 fi
 
 # Create .env if not exists
 if [ ! -f "$HERMES_HOME/.env" ]; then
-    cat > "$HERMES_HOME/.env" << 'ENV'
-# Fill in your values below
+    cat > "$HERMES_HOME/.env" << ENVFILE
+# Agent Icikiwir - Environment Variables
+# Fill in ONLY the key for your chosen provider
+
+# === Telegram Bot ===
 TELEGRAM_BOT_TOKEN=
+TELEGRAM_ALLOWED_USERS=
+TELEGRAM_HOME_CHANNEL=
+
+# === LLM Providers (fill ONE) ===
+# Xiaomi (MiMo)
 XIAOMI_API_KEY=
 XIAOMI_BASE_URL=https://token-plan-sgp.xiaomimimo.com/v1
+
+# Groq (free, fast)
+GROQ_API_KEY=
+
+# OpenRouter (all models)
+OPENROUTER_API_KEY=
+
+# OpenAI
+OPENAI_API_KEY=
+
+# Anthropic
+ANTHROPIC_API_KEY=
+
+# DeepSeek
+DEEPSEEK_API_KEY=
+
+# === Other ===
 TERMINAL_ENV=local
-ENV
+ENVFILE
     chmod 600 "$HERMES_HOME/.env"
     log ".env template created"
 else
@@ -368,13 +481,21 @@ echo ""
 echo -e "  ${CYAN}Location:${NC}     $HERMES_AGENT"
 echo -e "  ${CYAN}Config:${NC}       $HERMES_HOME/config.yaml"
 echo -e "  ${CYAN}Env:${NC}          $HERMES_HOME/.env"
+echo -e "  ${CYAN}Provider:${NC}     ${PROVIDER_NAME:-not set}"
+echo -e "  ${CYAN}Model:${NC}        ${PROVIDER_MODEL:-not set}"
 echo -e "  ${CYAN}Skills:${NC}       $(find "$HERMES_HOME/skills" -name 'SKILL.md' 2>/dev/null | wc -l) installed"
 echo -e "  ${CYAN}Memories:${NC}     $HERMES_HOME/memories/"
 echo ""
 echo -e "  ${YELLOW}⚠️  NEXT STEPS:${NC}"
 echo ""
-echo -e "  ${BLUE}1.${NC} Edit your API keys:"
-echo -e "     ${CYAN}nano $HERMES_HOME/.env${NC}"
+if [ -n "${PROVIDER_ENV_KEY:-}" ]; then
+    echo -e "  ${BLUE}1.${NC} Add your ${GREEN}${PROVIDER_ENV_KEY}${NC} in:"
+    echo -e "     ${CYAN}nano $HERMES_HOME/.env${NC}"
+else
+    echo -e "  ${BLUE}1.${NC} Edit your config & API keys:"
+    echo -e "     ${CYAN}nano $HERMES_HOME/.env${NC}"
+    echo -e "     ${CYAN}nano $HERMES_HOME/config.yaml${NC}"
+fi
 echo ""
 echo -e "  ${BLUE}2.${NC} Start the gateway:"
 echo -e "     ${CYAN}sudo systemctl start hermes-gateway${NC}"
