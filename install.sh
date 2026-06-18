@@ -281,6 +281,20 @@ else
 fi
 
 # ============================================================
+# STEP 9.5: Restore SOUL.md
+# ============================================================
+header "💀 Restoring SOUL.md"
+
+if [ -f "$SCRIPT_DIR/SOUL.md" ]; then
+    cp "$SCRIPT_DIR/SOUL.md" "$HERMES_HOME/SOUL.md"
+    log "SOUL.md restored"
+elif [ -f "$HERMES_HOME/SOUL.md" ]; then
+    log "SOUL.md already exists"
+else
+    warn "No SOUL.md found. Agent will use default personality."
+fi
+
+# ============================================================
 # STEP 10: Setup Gateway Service
 # ============================================================
 header "🌐 Setting up Gateway"
